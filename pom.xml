@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
 
@@ -59,26 +59,31 @@
           <artifactId>scala-maven-plugin</artifactId>
           <version>3.2.0</version>
         </plugin>
-		<plugin>
-		  <groupId>com.mycila</groupId>
-		  <artifactId>license-maven-plugin</artifactId>
-		  <version>2.9</version>
-		</plugin>
-		<plugin>
-		  <groupId>org.apache.maven.plugins</groupId>
-		  <artifactId>maven-source-plugin</artifactId>
-		  <version>2.4</version>
-		</plugin>
+        <plugin>
+          <groupId>com.mycila</groupId>
+          <artifactId>license-maven-plugin</artifactId>
+          <version>2.9</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-source-plugin</artifactId>
+          <version>2.4</version>
+        </plugin>
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-assembly-plugin</artifactId>
           <version>2.5.3</version>
         </plugin>
-	  	<plugin>
-		  <groupId>org.apache.maven.plugins</groupId>
-		  <artifactId>maven-release-plugin</artifactId>
-		  <version>2.5.1</version>
-		</plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-release-plugin</artifactId>
+          <version>2.5.1</version>
+        </plugin>
+        <plugin>
+          <groupId>ro.kuberam.maven.plugins</groupId>
+          <artifactId>kuberam-expath-plugin</artifactId>
+          <version>0.4.1</version>
+        </plugin>
       </plugins>
     </pluginManagement>
 
@@ -87,72 +92,101 @@
         <groupId>net.alchim31.maven</groupId>
         <artifactId>scala-maven-plugin</artifactId>
         <configuration>
-	  	  <recompileMode>all</recompileMode>	<!-- NOTE: "incremental" compilation although faster may require passing to MAVEN_OPTS="-XX:MaxPermSize=128m" -->
-          <useZincServer>true</useZincServer>	<!-- NOTE: if you have Zinc server installed and running, you can get faster compilation by enabling this -->
+          <recompileMode>all</recompileMode>
+          <!-- NOTE: "incremental" compilation although faster may require passing to MAVEN_OPTS="-XX:MaxPermSize=128m" -->
+          <useZincServer>true</useZincServer>
+          <!-- NOTE: if you have Zinc server installed and running, you can get faster compilation by enabling this -->
         </configuration>
         <executions>
           <execution>
             <goals>
-			  <goal>compile</goal>
-			  <goal>testCompile</goal>
-		    </goals>
-		  </execution>
-		  <execution>
-			<id>scala-doc-jar</id>
-			<phase>verify</phase>
-			<goals>
-			  <goal>doc-jar</goal>
-			</goals>
-		  </execution>
+              <goal>compile</goal>
+              <goal>testCompile</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>scala-doc-jar</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>doc-jar</goal>
+            </goals>
+          </execution>
         </executions>
       </plugin>
-	  <plugin>
-		<groupId>com.mycila</groupId>
-		<artifactId>license-maven-plugin</artifactId>
-		<configuration>
-			<header>com/mycila/maven/plugin/license/templates/BSD-3.txt</header>
-			<properties>
-				<owner>Adam Retter</owner>
-				<year>${project.inceptionYear}</year>
-				<email>adam.retter@googlemail.com</email>
-			</properties>
-			<excludes>
-				<exclude>pom.xml</exclude>
-			</excludes>
-		</configuration>
-		<executions>
-			<execution>
-				<goals>
-					<goal>check</goal>
-				</goals>
-			</execution>
-		</executions>
-	  </plugin>
-        <plugin>
-            <artifactId>maven-assembly-plugin</artifactId>
+      <plugin>
+        <groupId>com.mycila</groupId>
+        <artifactId>license-maven-plugin</artifactId>
+        <configuration>
+          <header>com/mycila/maven/plugin/license/templates/BSD-3.txt</header>
+          <properties>
+            <owner>Adam Retter</owner>
+            <year>${project.inceptionYear}</year>
+            <email>adam.retter@googlemail.com</email>
+          </properties>
+          <excludes>
+            <exclude>pom.xml</exclude>
+          </excludes>
+        </configuration>
+        <executions>
+          <execution>
+            <goals>
+              <goal>check</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <artifactId>maven-assembly-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>make-assembly</id>
+            <phase>package</phase>
+            <goals>
+              <goal>single</goal>
+            </goals>
+          </execution>
+        </executions>
+        <configuration>
+          <descriptorRefs>
+            <!-- TODO remove once eXist supports more complex dependencies -->
+            <descriptorRef>jar-with-dependencies</descriptorRef>
+          </descriptorRefs>
+          <descriptors>
+            <descriptor>src/assembly/unpacked-dist.xml</descriptor>
+          </descriptors>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>ro.kuberam.maven.plugins</groupId>
+        <artifactId>kuberam-expath-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>create-xar</id>
+            <phase>package</phase>
+            <goals>
+              <goal>make-xar</goal>
+            </goals>
             <configuration>
-                <descriptorRefs>
-                    <descriptorRef>jar-with-dependencies</descriptorRef> <!-- TODO remove -->
-                </descriptorRefs>
-                <descriptors>
-                    <descriptor>src/assembly/unpacked-dist.xml</descriptor>
-                </descriptors>
+              <descriptor>src/assembly/expath-pkg.assembly.xml</descriptor>
+              <finalName>exist-expath-${project.artifactId}-${project.version}</finalName>
             </configuration>
-        </plugin>
+          </execution>
+        </executions>
+      </plugin>
     </plugins>
 
   </build>
 
-    <repositories>
-        <repository>
-            <id>exist</id>
-            <url>https://raw.github.com/eXist-db/mvn-repo/master/</url>
-        </repository>
-        <repository>
-            <id>bintray</id>
-            <name>bintray</name>
-            <url>http://dl.bintray.com/scalaz/releases</url>
-        </repository>
-    </repositories>
-    
+  <repositories>
+    <repository>
+      <id>exist</id>
+      <url>https://raw.github.com/eXist-db/mvn-repo/master/</url>
+    </repository>
+    <repository>
+      <id>bintray</id>
+      <name>bintray</name>
+      <url>http://dl.bintray.com/scalaz/releases</url>
+    </repository>
+  </repositories>
+
 </project>
