@@ -16,7 +16,7 @@
   <properties>
     <scala.lib.version>2.11</scala.lib.version>
     <scala.version>2.11.5</scala.version>
-    <exist.version>2.3-SNAPSHOT</exist.version>
+    <exist.version>3.0.RC1</exist.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
 
@@ -38,7 +38,7 @@
     </dependency>
     <dependency>
       <groupId>org.exist-db</groupId>
-      <artifactId>existdb-core</artifactId>
+      <artifactId>exist-core</artifactId>
       <version>${exist.version}</version>
       <scope>provided</scope>
     </dependency>
