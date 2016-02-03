@@ -306,14 +306,14 @@ class ExpathFileFunctions(context: XQueryContext, signature: FunctionSignature) 
       case "parent" =>
         fileProperty(args)(fm.parent)
 
-      case "children" =>
-        val path = sarg(args)(0)
+      // case "children" =>
+      //   val path = sarg(args)(0)
 
-        path.map {
-          path =>
-            val seq = new ValueSequence()
-            valueOrError(fm.children(path).map(_.to(seqSink(seq)).run.attemptRun)).map(_ => seq)
-        } | invalidArg
+      //   path.map {
+      //     path =>
+      //       val seq = new ValueSequence()
+      //       valueOrError(fm.children(path).map(_.to(seqSink(seq)).run.attemptRun)).map(_ => seq)
+      //   } | invalidArg
 
       case "path-to-native" =>
         fileProperty(args)(fm.pathToNative).map(StringToXdmString(_))
