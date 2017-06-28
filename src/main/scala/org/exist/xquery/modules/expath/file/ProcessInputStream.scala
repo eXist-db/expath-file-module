@@ -1,5 +1,5 @@
 /**
- * Copyright © 2015, Adam Retter
+ * Copyright © 2015, eXist-db
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -24,7 +24,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-package org.exist.expath.module.file
+package org.exist.xquery.modules.expath.file
 
 import scalaz.concurrent.Task
 import scalaz.stream.Cause.Terminated

@@ -13,9 +13,9 @@ $ mvn install
 
 Then to build a XAR for this module run:
 ```bash
-$ git clone https://github.com/adamretter/exist-expath-file-module.git
-$ cd exist-expath-file-module
-$ mvn package
+$ git clone https://github.com/exist-db/expath-file-module.git
+$ cd expath-file-module
+$ mvn clean compile package
 ```
 
 You will then find a XAR file in the `target/` folder
