@@ -32,41 +32,17 @@ import org.exist.xdm.Function.{Parameter, ResultType}
 import org.exist.xdm.Type
 import org.exist.xdm.XdmImplicits._
 import org.exist.xquery.ErrorCodes.ErrorCode
-import org.exist.xquery.{ 
-  AbstractInternalModule,
-  BasicFunction,
-  Cardinality,
-  FunctionDef,
-  FunctionSignature,
-  XPathException,
-  XQueryContext }
+import org.exist.xquery.{AbstractInternalModule, BasicFunction, FunctionDef, FunctionSignature, XPathException, XQueryContext}
 import org.exist.xquery.util.SerializerUtils
-import org.exist.xquery.value.{
-  Base64BinaryValueType,
-  BooleanValue,
-  BinaryValue,
-  BinaryValueFromInputStream,
-  Item,
-  IntegerValue,
-  NodeValue,
-  Sequence,
-  StringValue,
-  ValueSequence }
-import org.exquery.expath.module.file.{FileModule, FileModuleError, FileModuleErrors}
+import org.exist.xquery.value.{Base64BinaryValueType, BinaryValue, BinaryValueFromInputStream, BooleanValue, IntegerValue, Item, NodeValue, Sequence, StringValue, ValueSequence}
+import org.exquery.expath.module.file.{FileModule, FileModuleErrors, FileModuleException}
 import FileModule._
+import java.io.{ByteArrayInputStream, InputStream, ByteArrayOutputStream => JByteArrayOutputStream, OutputStreamWriter => JOutputStreamWriter}
+import java.net.URI
+import java.util.{List => JList, Map => JMap, Properties => JProperties}
 
-import java.io.{ByteArrayOutputStream => JByteArrayOutputStream, OutputStreamWriter => JOutputStreamWriter}
-import java.net.{URI => JURI}
-import java.util.{Date, List => JList, Map => JMap, Properties => JProperties}
-
-import resource._
-import scalaz._
-import Maybe._
-import Scalaz._
-import scalaz.stream._
-import scalaz.concurrent.Task
-import scodec.bits.ByteVector
-import scala.collection.mutable.ArrayBuffer
+import fs2.{Stream, io}
+import cats.effect.{IO, Sync}
 
 
 /**
@@ -102,44 +78,44 @@ object ExpathFileModule {
   private val binaryResultType = ResultType(Type.base64Binary, "The binary data")
   private val textResultType = ResultType(Type.string, "The text data")
 
-  private def signatures(name: String, description: String, multiParameters: Seq[Seq[Parameter]], resultType: Maybe[ResultType]) : Seq[FunctionSignature] = org.exist.xdm.Function.signatures(new QName(name, FileModule.NAMESPACE, FileModule.PREFIX), description, multiParameters, resultType)
+  private def signatures(name: String, description: String, multiParameters: Seq[Seq[Parameter]], resultType: Option[ResultType]) : Seq[FunctionSignature] = org.exist.xdm.Function.signatures(new QName(name, FileModule.NAMESPACE, FileModule.PREFIX), description, multiParameters, resultType)
   private def functionDefs(signatures: Seq[FunctionSignature]) = signatures.map(new FunctionDef(_, classOf[ExpathFileFunctions]))
 
   val functions = Seq(
-    functionDefs(signatures("exists", "Tests if the file or directory pointed by $path exists.", Seq(Seq(pathParam)), just(ResultType(Type.boolean, "true if the file exists.")))),
-    functionDefs(signatures("is-dir", "Tests if $path points to a directory. On UNIX-based systems the root and the volume roots are considered directories.", Seq(Seq(pathParam)), just(ResultType(Type.boolean, "true if the path is a directory.")))),
-    functionDefs(signatures("is-file", "Tests if $path points to a file.", Seq(Seq(pathParam)), just(ResultType(Type.boolean, "true if the path is a file.")))),
-    functionDefs(signatures("last-modified", "Returns the last modification time of a file or directory.", Seq(Seq(pathParam)), just(ResultType(Type.dateTime, "The last modification time of the directory or file.")))),
-    functionDefs(signatures("size", "Returns the byte size of a file, or the value 0 for directories.", Seq(Seq(fileParam)), just(ResultType(Type.integer, "The size in bytes of a file, or 0 if a directory.")))),
-    functionDefs(signatures("append", "Appends a sequence of items to a file. If the file pointed by $file does not exist, a new file will be created.", Seq(Seq(fileParam, itemsParam), Seq(fileParam, itemsParam, paramsParam)), empty)),
-    functionDefs(signatures("append-binary", "Appends a Base64 item as binary to a file. If the file pointed by $file does not exist, a new file will be created.", Seq(Seq(fileParam, binaryValueParam)), empty)),
-    functionDefs(signatures("append-text", "Appends a string to a file. If the file pointed by $file does not exist, a new file will be created. Encoding is assumed to be UTF-8 if not specified.", Seq(Seq(fileParam, valueParam), Seq(fileParam, valueParam, encodingParam)), empty)),
-    functionDefs(signatures("append-text-lines", "Appends a sequence of strings to a file, each followed by the system-dependent newline character. If the file pointed by $file does not exist, a new file will be created. Encoding is assumed to be UTF-8 if not specified", Seq(Seq(fileParam, linesParam), Seq(fileParam, linesParam, encodingParam)), empty)),
-    functionDefs(signatures("copy", "Copies a file or a directory given a source and a target path/URI.", Seq(Seq(Parameter("source", Type.string, "The path to the file or directory to copy"), Parameter("target", Type.string, "The path to the target file or directory for the copy"))), empty)),
-    functionDefs(signatures("create-dir", "Creates a directory, or does nothing if the directory already exists. The operation will create all non-existing parent directories.", Seq(Seq(dirParam())), empty)),
-    functionDefs(signatures("create-temp-dir", "Creates a temporary directory and all non-existing parent directories.", Seq(Seq(prefixParam, suffixParam), Seq(prefixParam, suffixParam, dirParam("A directory in which to create the temporary directory"))), just(pathResultType))),
-    functionDefs(signatures("create-temp-file", "Creates a temporary file and all non-existing parent directories.", Seq(Seq(prefixParam, suffixParam), Seq(prefixParam, suffixParam, dirParam("A directory in which to create the temporary file"))), just(pathResultType))),
-    functionDefs(signatures("delete", "Deletes a file or a directory from the file system.", Seq(Seq(pathParam), Seq(pathParam, recursiveParam)), empty)),
-    functionDefs(signatures("list", """Lists all files and directories in a given directory. The order of the items in the resulting sequence is not defined. The "." and ".." items are never returned. The returned paths are relative to the provided directory $dir.""", Seq(Seq(dirParam()), Seq(dirParam(), recursiveParam), Seq(dirParam(), recursiveParam, Parameter("pattern", Type.string, "Defines a name pattern in the glob syntax. Only the paths of the files and directories whose names are matching the pattern will be returned."))), empty)),
-    functionDefs(signatures("move", "Moves a file or a directory given a source and a target path/URI.", Seq(Seq(Parameter("source", Type.string, "The path to the file or directory to move"), Parameter("target", Type.string, "The path to the target file or directory for the move"))), empty)),
-    functionDefs(signatures("read-binary", "Returns the content of a file in its Base64 representation.", Seq(Seq(fileParam), Seq(fileParam, offsetParam), Seq(fileParam, offsetParam, lengthParam)), just(binaryResultType))),
-    functionDefs(signatures("read-text", "Returns the content of a file in its string representation. Encoding is assumed to be UTF-8 if not specified.", Seq(Seq(fileParam), Seq(fileParam, encodingParam)), just(textResultType))),
-    functionDefs(signatures("read-text-lines", "Returns the contents of a file as a sequence of strings, separated at newline boundaries. Encoding is assumed to be UTF-8 if not specified.", Seq(Seq(fileParam), Seq(fileParam, encodingParam)), just(textResultType))),
-    functionDefs(signatures("write", "Writes a sequence of items to a file. If the file pointed to by $file already exists, it will be overwritten.", Seq(Seq(fileParam, itemsParam), Seq(fileParam, itemsParam, paramsParam)), empty)),
-    functionDefs(signatures("write-binary", "Writes a Base64 item as binary to a file. If the file pointed to by $file already exists, it will be overwritten.", Seq(Seq(fileParam, binaryValueParam), Seq(fileParam, binaryValueParam, offsetParam)), empty)),
-    functionDefs(signatures("write-text", "Writes a string to a file. If the file pointed to by $file already exists, it will be overwritten. Encoding is assumed to be UTF-8.", Seq(Seq(fileParam, valueParam), Seq(fileParam, valueParam, encodingParam)), empty)),
-    functionDefs(signatures("write-text-lines", "Writes a sequence of strings to a file, each followed by the system-dependent newline character. If the file pointed to by $file already exists, it will be overwritten. Encoding is assumed to be UTF-8 if bit specified.", Seq(Seq(fileParam, valuesParam), Seq(fileParam, valuesParam, encodingParam)), empty)),
-    functionDefs(signatures("name", "Returns the name of a file or directory.", Seq(Seq(pathParam)), just(ResultType(Type.string, "The name of the directory or file.")))),
-    functionDefs(signatures("parent", "Transforms the given path into an absolute path, as specified by file:resolve-path, and returns the parent directory.", Seq(Seq(pathParam)), just(ResultType(Type.string_?, "The name of the parent or the empty-sequence if the parent is a filesystem root.")))),
-    functionDefs(signatures("path-to-native", "Transforms a URI, an absolute path, or relative path to a canonical, system-dependent path representation. A canonical path is both absolute and unique and thus contains no redirections such as references to parent directories or symbolic links.", Seq(Seq(pathParam)), just(ResultType(Type.string, "The resulting native path.")))),
-    functionDefs(signatures("path-to-uri", "Transforms a file system path into a URI with the file:// scheme. If the path is relative, it is first resolved against the current working directory.", Seq(Seq(pathParam)), just(ResultType(Type.uri, "The resulting path URI.")))),
-    functionDefs(signatures("resolve-path", "Transforms a relative path into an absolute operating system path by resolving it against the current working directory. If the resulting path points to a directory, it will be suffixed with the system-specific directory separator.", Seq(Seq(pathParam)), just(ResultType(Type.string, "The absolute filesystem path.")))),
-    functionDefs(signatures("dir-separator", """Returns the value of the operating system-specific directory separator, which usually is / on UNIX-based systems and \ on Windows systems.""", Seq.empty, just(ResultType(Type.string, "The directory separator")))),
-    functionDefs(signatures("line-separator", "Returns the value of the operating system-specific line separator, which usually is &#10; on UNIX-based systems, &#13;&#10; on Windows systems and &#13; on Mac systems.", Seq.empty, just(ResultType(Type.string, "The line separator")))),
-    functionDefs(signatures("path-separator", "Returns the value of the operating system-specific path separator, which usually is : on UNIX-based systems and ; on Windows systems.", Seq.empty, just(ResultType(Type.string, "The path separator")))),
-    functionDefs(signatures("temp-dir", "Returns the path to the default temporary-file directory of an operating system.", Seq.empty, just(ResultType(Type.string, "The path of the temporary directory.")))),
-    functionDefs(signatures("base-dir", "Returns the parent directory of the static base URI. If the Base URI property is undefined, the empty sequence is returned.", Seq.empty, just(ResultType(Type.string_?, "The parent directory of the static base URI.")))),
-    functionDefs(signatures("current-dir", "Returns the current working directory.", Seq.empty, just(ResultType(Type.string, "The current working directory."))))
+    functionDefs(signatures("exists", "Tests if the file or directory pointed by $path exists.", Seq(Seq(pathParam)), Some(ResultType(Type.boolean, "true if the file exists.")))),
+    functionDefs(signatures("is-dir", "Tests if $path points to a directory. On UNIX-based systems the root and the volume roots are considered directories.", Seq(Seq(pathParam)), Some(ResultType(Type.boolean, "true if the path is a directory.")))),
+    functionDefs(signatures("is-file", "Tests if $path points to a file.", Seq(Seq(pathParam)), Some(ResultType(Type.boolean, "true if the path is a file.")))),
+    functionDefs(signatures("last-modified", "Returns the last modification time of a file or directory.", Seq(Seq(pathParam)), Some(ResultType(Type.dateTime, "The last modification time of the directory or file.")))),
+    functionDefs(signatures("size", "Returns the byte size of a file, or the value 0 for directories.", Seq(Seq(fileParam)), Some(ResultType(Type.integer, "The size in bytes of a file, or 0 if a directory.")))),
+    functionDefs(signatures("append", "Appends a sequence of items to a file. If the file pointed by $file does not exist, a new file will be created.", Seq(Seq(fileParam, itemsParam), Seq(fileParam, itemsParam, paramsParam)), None)),
+    functionDefs(signatures("append-binary", "Appends a Base64 item as binary to a file. If the file pointed by $file does not exist, a new file will be created.", Seq(Seq(fileParam, binaryValueParam)), None)),
+    functionDefs(signatures("append-text", "Appends a string to a file. If the file pointed by $file does not exist, a new file will be created. Encoding is assumed to be UTF-8 if not specified.", Seq(Seq(fileParam, valueParam), Seq(fileParam, valueParam, encodingParam)), None)),
+    functionDefs(signatures("append-text-lines", "Appends a sequence of strings to a file, each followed by the system-dependent newline character. If the file pointed by $file does not exist, a new file will be created. Encoding is assumed to be UTF-8 if not specified", Seq(Seq(fileParam, linesParam), Seq(fileParam, linesParam, encodingParam)), None)),
+    functionDefs(signatures("copy", "Copies a file or a directory given a source and a target path/URI.", Seq(Seq(Parameter("source", Type.string, "The path to the file or directory to copy"), Parameter("target", Type.string, "The path to the target file or directory for the copy"))), None)),
+    functionDefs(signatures("create-dir", "Creates a directory, or does nothing if the directory already exists. The operation will create all non-existing parent directories.", Seq(Seq(dirParam())), None)),
+    functionDefs(signatures("create-temp-dir", "Creates a temporary directory and all non-existing parent directories.", Seq(Seq(prefixParam, suffixParam), Seq(prefixParam, suffixParam, dirParam("A directory in which to create the temporary directory"))), Some(pathResultType))),
+    functionDefs(signatures("create-temp-file", "Creates a temporary file and all non-existing parent directories.", Seq(Seq(prefixParam, suffixParam), Seq(prefixParam, suffixParam, dirParam("A directory in which to create the temporary file"))), Some(pathResultType))),
+    functionDefs(signatures("delete", "Deletes a file or a directory from the file system.", Seq(Seq(pathParam), Seq(pathParam, recursiveParam)), None)),
+    functionDefs(signatures("list", """Lists all files and directories in a given directory. The order of the items in the resulting sequence is not defined. The "." and ".." items are never returned. The returned paths are relative to the provided directory $dir.""", Seq(Seq(dirParam()), Seq(dirParam(), recursiveParam), Seq(dirParam(), recursiveParam, Parameter("pattern", Type.string, "Defines a name pattern in the glob syntax. Only the paths of the files and directories whose names are matching the pattern will be returned."))), None)),
+    functionDefs(signatures("move", "Moves a file or a directory given a source and a target path/URI.", Seq(Seq(Parameter("source", Type.string, "The path to the file or directory to move"), Parameter("target", Type.string, "The path to the target file or directory for the move"))), None)),
+    functionDefs(signatures("read-binary", "Returns the content of a file in its Base64 representation.", Seq(Seq(fileParam), Seq(fileParam, offsetParam), Seq(fileParam, offsetParam, lengthParam)), Some(binaryResultType))),
+    functionDefs(signatures("read-text", "Returns the content of a file in its string representation. Encoding is assumed to be UTF-8 if not specified.", Seq(Seq(fileParam), Seq(fileParam, encodingParam)), Some(textResultType))),
+    functionDefs(signatures("read-text-lines", "Returns the contents of a file as a sequence of strings, separated at newline boundaries. Encoding is assumed to be UTF-8 if not specified.", Seq(Seq(fileParam), Seq(fileParam, encodingParam)), Some(textResultType))),
+    functionDefs(signatures("write", "Writes a sequence of items to a file. If the file pointed to by $file already exists, it will be overwritten.", Seq(Seq(fileParam, itemsParam), Seq(fileParam, itemsParam, paramsParam)), None)),
+    functionDefs(signatures("write-binary", "Writes a Base64 item as binary to a file. If the file pointed to by $file already exists, it will be overwritten.", Seq(Seq(fileParam, binaryValueParam), Seq(fileParam, binaryValueParam, offsetParam)), None)),
+    functionDefs(signatures("write-text", "Writes a string to a file. If the file pointed to by $file already exists, it will be overwritten. Encoding is assumed to be UTF-8.", Seq(Seq(fileParam, valueParam), Seq(fileParam, valueParam, encodingParam)), None)),
+    functionDefs(signatures("write-text-lines", "Writes a sequence of strings to a file, each followed by the system-dependent newline character. If the file pointed to by $file already exists, it will be overwritten. Encoding is assumed to be UTF-8 if bit specified.", Seq(Seq(fileParam, valuesParam), Seq(fileParam, valuesParam, encodingParam)), None)),
+    functionDefs(signatures("name", "Returns the name of a file or directory.", Seq(Seq(pathParam)), Some(ResultType(Type.string, "The name of the directory or file.")))),
+    functionDefs(signatures("parent", "Transforms the given path into an absolute path, as specified by file:resolve-path, and returns the parent directory.", Seq(Seq(pathParam)), Some(ResultType(Type.string_?, "The name of the parent or the empty-sequence if the parent is a filesystem root.")))),
+    functionDefs(signatures("path-to-native", "Transforms a URI, an absolute path, or relative path to a canonical, system-dependent path representation. A canonical path is both absolute and unique and thus contains no redirections such as references to parent directories or symbolic links.", Seq(Seq(pathParam)), Some(ResultType(Type.string, "The resulting native path.")))),
+    functionDefs(signatures("path-to-uri", "Transforms a file system path into a URI with the file:// scheme. If the path is relative, it is first resolved against the current working directory.", Seq(Seq(pathParam)), Some(ResultType(Type.uri, "The resulting path URI.")))),
+    functionDefs(signatures("resolve-path", "Transforms a relative path into an absolute operating system path by resolving it against the current working directory. If the resulting path points to a directory, it will be suffixed with the system-specific directory separator.", Seq(Seq(pathParam)), Some(ResultType(Type.string, "The absolute filesystem path.")))),
+    functionDefs(signatures("dir-separator", """Returns the value of the operating system-specific directory separator, which usually is / on UNIX-based systems and \ on Windows systems.""", Seq.empty, Some(ResultType(Type.string, "The directory separator")))),
+    functionDefs(signatures("line-separator", "Returns the value of the operating system-specific line separator, which usually is &#10; on UNIX-based systems, &#13;&#10; on Windows systems and &#13; on Mac systems.", Seq.empty, Some(ResultType(Type.string, "The line separator")))),
+    functionDefs(signatures("path-separator", "Returns the value of the operating system-specific path separator, which usually is : on UNIX-based systems and ; on Windows systems.", Seq.empty, Some(ResultType(Type.string, "The path separator")))),
+    functionDefs(signatures("temp-dir", "Returns the path to the default temporary-file directory of an operating system.", Seq.empty, Some(ResultType(Type.string, "The path of the temporary directory.")))),
+    functionDefs(signatures("base-dir", "Returns the parent directory of the static base URI. If the Base URI property is undefined, the empty sequence is returned.", Seq.empty, Some(ResultType(Type.string_?, "The parent directory of the static base URI.")))),
+    functionDefs(signatures("current-dir", "Returns the current working directory.", Seq.empty, Some(ResultType(Type.string, "The current working directory."))))
   ).reduceLeft(_ ++ _).toArray
 }
 
@@ -153,22 +129,32 @@ class ExpathFileFunctions(context: XQueryContext, signature: FunctionSignature) 
 
   @throws[XPathException]
   override def eval(args: Array[Sequence], contextSequence: Sequence) : Sequence = {
-    
+
     signature.getName.getLocalPart match {
       case "exists" =>
-        fileProperty(args)(fm.exists)
+        getOrThrow[Boolean](valueOrError(
+          fileProperty(args)(fm.exists[IO]).attempt.unsafeRunSync()
+        ))
 
       case "is-dir" =>
-        fileProperty(args)(fm.isDir)
+        getOrThrow[Boolean](valueOrError(
+          fileProperty(args)(fm.isDir[IO]).attempt.unsafeRunSync()
+        ))
 
       case "is-file" =>
-        fileProperty(args)(fm.isFile)
+        getOrThrow[Boolean](valueOrError(
+          fileProperty(args)(fm.isFile[IO]).attempt.unsafeRunSync()
+        ))
 
       case "last-modified" =>
-        fileProperty(args)(fm.lastModified).map(LongToXdmDateTime)
+        getOrThrow(valueOrError(
+          fileProperty(args)(fm.lastModified[IO]).map(LongToXdmDateTime).attempt.unsafeRunSync()
+        ))
 
       case "size" =>
-        fileProperty(args)(fm.fileSize).map(LongToXdmInteger)
+        getOrThrow(valueOrError(
+          fileProperty(args)(fm.fileSize[IO]).map(LongToXdmInteger).attempt.unsafeRunSync()
+        ))
 
       case "append" =>
         appendOrWrite(args, append = true)
@@ -186,18 +172,26 @@ class ExpathFileFunctions(context: XQueryContext, signature: FunctionSignature) 
         val source = sarg(args)(0)
         val target = sarg(args)(1)
 
-        source.zip(target) match {
-          case Just((source, target)) =>
-            fm.copy(source, target)
-          case empty =>
+        zip(source, target) match {
+          case Some((source, target)) =>
+            getOrThrow(valueOrError(
+              fm.copy[IO](source, target)
+                .map(_ => Sequence.EMPTY_SEQUENCE)
+                .attempt.unsafeRunSync()
+            ))
+          case None =>
             invalidArg
         }
 
       case "create-dir" =>
         sarg(args)(0) match {
-          case Just(dir) =>
-            fm.createDir(dir)
-          case empty =>
+          case Some(dir) =>
+            getOrThrow(valueOrError(
+              fm.createDir[IO](dir)
+                .map(_ => Sequence.EMPTY_SEQUENCE)
+                .attempt.unsafeRunSync()
+            ))
+          case None =>
             invalidArg
         }
 
@@ -206,87 +200,120 @@ class ExpathFileFunctions(context: XQueryContext, signature: FunctionSignature) 
         val suffix = sarg(args)(1)
         val dir = sarg(args)(2)
 
-        prefix.zip(suffix).map {
+        zip(prefix, suffix).map {
           case (prefix, suffix) =>
-            fm.createTempDir(prefix, suffix, dir).map(StringToXdmString(_))
-        } | invalidArg
+            getOrThrow(valueOrError(
+              fm.createTempDir[IO](prefix, suffix, dir).map(StringToXdmString(_)).attempt.unsafeRunSync()
+            ))
+        }.getOrElse(invalidArg)
 
       case "create-temp-file" =>
         val prefix = sarg(args)(0)
         val suffix = sarg(args)(1)
         val dir = sarg(args)(2)
 
-        prefix.zip(suffix).map {
+        zip(prefix, suffix).map {
           case (prefix, suffix) =>
-            fm.createTempFile(prefix, suffix, dir).map(StringToXdmString(_))
-        } | invalidArg
+            getOrThrow(valueOrError(
+              fm.createTempFile[IO](prefix, suffix, dir).map(StringToXdmString(_)).attempt.unsafeRunSync()
+            ))
+        }.getOrElse(invalidArg)
 
       case "delete" =>
         val path = sarg(args)(0)
-        val recursive: Boolean = bv2b(barg(args)(1)) | false
+        val recursive: Boolean = bv2b(barg(args)(1)).getOrElse(false)
         path match {
-          case Just(path) =>
-            fm.delete(path, recursive)
-          case empty =>
+          case Some(path) =>
+            getOrThrow(valueOrError(
+              fm.delete[IO](path, recursive)
+                .map(_ => Sequence.EMPTY_SEQUENCE)
+                .attempt.unsafeRunSync()
+            ))
+          case None =>
             invalidArg
         }
 
       case "list" =>
         val dir = sarg(args)(0)
-        val recursive = bv2b(barg(args)(1)) | false
+        val recursive = bv2b(barg(args)(1)).getOrElse(false)
         val pattern = sarg(args)(0)
 
         dir.map {
           dir =>
-            val seq = new ValueSequence()
-            valueOrError(fm.list(dir, recursive, pattern).map(_.to(seqSink(seq)).run.attemptRun)).map(_ => seq)
-        } | invalidArg
+            getOrThrow(valueOrError(
+              fm.list[IO](dir, recursive, pattern)
+                .map { paths =>
+                  val seq = new ValueSequence()
+                  paths.map(path => seq.add(path))
+                  seq
+                }.attempt.unsafeRunSync()
+            ))
+        }.getOrElse(invalidArg)
 
       case "move" =>
         val source = sarg(args)(0)
         val target = sarg(args)(1)
 
-        source.zip(target) match {
-          case Just((source, target)) =>
-            fm.move(source, target)
-          case empty =>
+        zip(source, target) match {
+          case Some((source, target)) =>
+            getOrThrow(valueOrError(
+              fm.move[IO](source, target)
+                .map(_ => Sequence.EMPTY_SEQUENCE)
+                .attempt.unsafeRunSync()
+            ))
+          case None =>
             invalidArg
         }
-        
+
       case "read-binary" =>
         val file = sarg(args)(0)
-        val offset = iv2i(iarg(args)(1)) | 0
+        val offset = iv2i(iarg(args)(1)).getOrElse(0)
         val length = iarg(args)(2)
 
         file.map {
           file =>
-            fm.readBinary(file, offset, length).map {
-              chan =>
-                val p = Process.constant(FileModule.DEFAULT_BUF_SIZE).toSource.through(chan)
-                BinaryValueFromInputStream.getInstance(context, new Base64BinaryValueType(), new ProcessInputStream(p))
-            }
+            // TODO must be a better way to go from fm.readBinary to BinaryValueFromInputStream -- without buffering in memory?
+            // what about --> stream.through(io.toInputStream[IO])
 
-        } | invalidArg
+            getOrThrow(valueOrError(
+              fm.readBinary[IO](file, offset, length).flatMap { stream =>
+                stream
+                .runFold(new JByteArrayOutputStream()){ case (buf, b) => buf.write(b); buf }
+                .map(_.toByteArray)
+                .map(inBuf => BinaryValueFromInputStream.getInstance(context, new Base64BinaryValueType(), new ByteArrayInputStream(inBuf)))
+              }.attempt.unsafeRunSync()
+          ))
+        }.getOrElse(invalidArg)
 
       case "read-text" =>
         val file = sarg(args)(0)
-        val encoding = sv2s(sarg(args)(1)) | FileModule.DEFAULT_CHAR_ENCODING
+        val encoding = sv2s(sarg(args)(1)).getOrElse(FileModule.DEFAULT_CHAR_ENCODING)
 
         file.map {
           file =>
-            val buf = new ArrayBuffer[String]
-            valueOrError(fm.readText(file, encoding).map(_.to(io.fillBuffer(buf)).run.attemptRun)).map(_ => StringToXdmString(buf.reduceLeft(_ + _)))
-        } | invalidArg
+
+            getOrThrow(valueOrError(
+              fm.readText[IO](file, encoding).flatMap { stream =>
+                stream
+                  .runFold(new StringBuilder()){ case (buf, str) => buf.append(str)}
+                  .map(_.toString())
+              }.attempt.unsafeRunSync()
+            ))
+        }.getOrElse(invalidArg)
 
       case "read-text-lines" =>
         val file = sarg(args)(0)
-        val encoding = sv2s(sarg(args)(1)) | FileModule.DEFAULT_CHAR_ENCODING
+        val encoding = sv2s(sarg(args)(1)).getOrElse(FileModule.DEFAULT_CHAR_ENCODING)
 
         file.map {
           file =>
-            val buf = new ArrayBuffer[String]
-            valueOrError(fm.readText(file, encoding).map(_.to(io.fillBuffer(buf)).run.attemptRun)).map(_ => new ValueSequence(buf.map(StringToXdmString(_)):_*))
-        } | invalidArg
+            getOrThrow(valueOrError(
+              fm.readText[IO](file, encoding).flatMap { stream =>
+                stream
+                  .runFold(new ValueSequence()){ case (buf, str) => buf.add(StringToXdmString(str)); buf}
+              }.attempt.unsafeRunSync()
+            ))
+        }.getOrElse(invalidArg)
 
       case "write" =>
         appendOrWrite(args, append = false)
@@ -301,10 +328,14 @@ class ExpathFileFunctions(context: XQueryContext, signature: FunctionSignature) 
         appendOrWriteTextLines(args, append = false)
 
       case "name" =>
-        fileProperty(args)(fm.name)
+        getOrThrow[String](valueOrError(
+          fileProperty(args)(fm.name[IO]).attempt.unsafeRunSync()
+        ))
 
       case "parent" =>
-        fileProperty(args)(fm.parent)
+        getOrThrow[Option[String]](valueOrError(
+          fileProperty(args)(fm.parent[IO]).attempt.unsafeRunSync()
+        ))
 
       // case "children" =>
       //   val path = sarg(args)(0)
@@ -316,13 +347,19 @@ class ExpathFileFunctions(context: XQueryContext, signature: FunctionSignature) 
       //   } | invalidArg
 
       case "path-to-native" =>
-        fileProperty(args)(fm.pathToNative).map(StringToXdmString(_))
+        getOrThrow[String](valueOrError(
+          fileProperty(args)(fm.pathToNative[IO]).attempt.unsafeRunSync()
+        ))
 
       case "path-to-uri" =>
-        fileProperty(args)(fm.pathToUri)
+        getOrThrow[URI](valueOrError(
+          fileProperty(args)(fm.pathToUri[IO]).attempt.unsafeRunSync()
+        ))
 
       case "resolve-path" =>
-        fileProperty(args)(fm.resolvePath)
+        getOrThrow[String](valueOrError(
+          fileProperty(args)(fm.resolvePath[IO]).attempt.unsafeRunSync()
+        ))
 
       case "dir-separator" =>
         fm.dirSeparator
@@ -337,97 +374,130 @@ class ExpathFileFunctions(context: XQueryContext, signature: FunctionSignature) 
         fm.tempDir
 
       case "base-dir" =>
-        fm.parent(context.getBaseURI.toString)
+        getOrThrow[Option[String]](valueOrError(
+          fm.parent[IO](context.getBaseURI.toString).attempt.unsafeRunSync()
+        ))
 
       case "current-dir" =>
         fm.currentDir
 
       case _ =>
-        throw new XPathException("Unknown function signature")
+        throw new XPathException(this, "Unknown function signature")
     }
   }
 
   /**
-   * Creates a Sink which appends Strings to the provided
-   * ValueSequence
+   * Zips two Options together if both are Some
    */
-  private def seqSink(seq: ValueSequence) : Sink[Task, String] = {
-    io.resource(Task.delay(seq))(seq => Task.delay()) {
-      seq => Task.now((s: String) => Task.delay(seq.add(StringToXdmString(s))))
-    }
-  }
+  private def zip[A, B](oa: Option[A], ob: Option[B]) : Option[(A, B)] = oa.flatMap(a => ob.map(b => (a, b)))
+
+   /**
+    * Zips an Option and a value together if the first is Some
+    */
+  private def zip[A, B](oa: Option[A], b: B) : Option[(A, B)] = oa.map(a => (a, b))
 
   @throws[XPathException]
   private def appendOrWrite(args: Array[Sequence], append: Boolean) : Sequence = {
     val file = sarg(args)(0)
-    val items : Maybe[Sequence] = args.get(1)
+    val items : Option[Sequence] = args.get(1)
     val outputProperties = new JProperties()
     arg[NodeValue](args)(2).map {
       params =>
         SerializerUtils.getSerializationOptions(this, params, outputProperties)
     }
 
-    file.zip(items).map {
+    zip(file, items).map {
       case (file, items) =>
-        val serializedStream = Process.eval(Task.delay(items)).pipe(process1.lift(serializeSequence(outputProperties)))
-        appendOrWrite(fm.write(file, append), serializedStream)
-    } | invalidArg
+        getOrThrow(valueOrError(
+          fm.writeBinary[IO](file, append).flatMap { writer =>
+            serializeSequence[IO](items, outputProperties)
+              .to(writer)
+              .run
+          }.map(_ => Sequence.EMPTY_SEQUENCE).attempt.unsafeRunSync()
+        ))
+    }.getOrElse(invalidArg)
   }
 
   @throws[XPathException]
-  private def appendBinary(args: Array[Sequence]) : Sequence = appendOrWriteBinary(args, fm.write(_, append = true))
+  private def appendBinary(args: Array[Sequence]) : Sequence = appendOrWriteBinary(args, append = true)
 
   @throws[XPathException]
   private def writeBinary(args: Array[Sequence]) : Sequence = {
-    val offset = iarg(args)(2).map(_.getInt) | 0
-    appendOrWriteBinary(args, fm.writeBinary(_, offset))
+    val file = sarg(args)(0)
+    val value = args.get(1).map(_.itemAt(0).asInstanceOf[BinaryValue])
+    val offset = iarg(args)(2).map(_.getInt).getOrElse(0)
+
+    zip(file, value).map {
+      case (file, value) =>
+        getOrThrow(valueOrError(
+          fm.writeBinary[IO](file, offset).flatMap { writer =>
+            io.readInputStream(IO(value.getInputStream), DEFAULT_BUF_SIZE, true)
+              .to(writer)
+              .run
+          }.map(_ => Sequence.EMPTY_SEQUENCE).attempt.unsafeRunSync()
+        ))
+    }.getOrElse(invalidArg)
   }
 
   @throws[XPathException]
-  private def appendOrWriteBinary(args : Array[Sequence], fasf: (String) => \/[FileModuleError, AppendStreamFn[ByteVector]]) : Sequence = {
+  private def appendOrWriteBinary[F[_]](args : Array[Sequence], append: Boolean) : Sequence = {
     val file = sarg(args)(0)
     val value = args.get(1).map(_.itemAt(0).asInstanceOf[BinaryValue])
 
-    file.zip(value).map {
+    zip(file, value).map {
       case (file, value) =>
-        val bin = Process.constant(DEFAULT_BUF_SIZE).toSource.through(io.chunkR(value.getInputStream))
-        appendOrWrite(fasf(file), bin)
-    } | invalidArg
+        getOrThrow(valueOrError(
+          fm.writeBinary[IO](file, append).flatMap { writer =>
+            io.readInputStream(IO(value.getInputStream), DEFAULT_BUF_SIZE, true)
+              .to(writer)
+              .run
+          }.map(_ => Sequence.EMPTY_SEQUENCE).attempt.unsafeRunSync()
+        ))
+    }.getOrElse(invalidArg)
   }
 
   @throws[XPathException]
   private def appendOrWriteText(args: Array[Sequence], append: Boolean) : Sequence = {
     val file = sarg(args)(0)
     val value = sarg(args)(1)
-    val encoding = arg[StringValue](args)(2).map(_.getStringValue) | "UTF-8"
+    val encoding = arg[StringValue](args)(2).map(_.getStringValue).getOrElse("UTF-8")
 
-    file.zip(value).map {
+    zip(file, value).map {
       case (file, value) =>
-        val txt = Process.eval(Task.delay[String](value))
-        appendOrWrite(fm.write(file, append, encoding), txt)
-    } | invalidArg
+        getOrThrow(valueOrError(
+          fm.writeText[IO](file, append, encoding).flatMap { writer =>
+            val stream: Stream[IO, String] = Stream.emit(value.getStringValue)
+            stream
+              .to(writer)
+              .run
+          }.map(_ => Sequence.EMPTY_SEQUENCE).attempt.unsafeRunSync()
+        ))
+    }.getOrElse(invalidArg)
   }
 
   @throws[XPathException]
   private def appendOrWriteTextLines(args: Array[Sequence], append: Boolean) : Sequence = {
     val file = sarg(args)(0)
-    val lines: Maybe[Sequence] = args.get(1)
-    val encoding = arg[StringValue](args)(2).map(_.getStringValue) | "UTF-8"
+    val lines: Option[Sequence] = args.get(1)
+    val encoding = arg[StringValue](args)(2).map(_.getStringValue).getOrElse("UTF-8")
 
-    file.zip(lines).map {
+    zip(file, lines).map {
       case (file, lines) if (!lines.isEmpty) =>
-        val lineStream = io.resource(Task.delay(lines))(lines => Task.delay()) {
-          lines =>
-            lazy val it = lines.iterate // A stateful iterator
-            Task.delay {
-              if (it.hasNext)
-                it.nextItem.asInstanceOf[StringValue].getStringValue
-              else
-                throw Cause.Terminated(Cause.End)
+        getOrThrow(valueOrError(
+          fm.writeText[IO](file, append, encoding).flatMap { writer =>
+          val stream: Stream[IO, String] = Stream.unfold(lines.iterate){ it =>
+            if(it.hasNext) {
+              Some((it.nextItem(), it))
+            } else {
+              None
             }
-        }
-        appendOrWrite(fm.write(file.getStringValue, append, encoding), lineStream)
-    } | invalidArg
+          }.map(_.asInstanceOf[StringValue].getStringValue)
+          stream
+              .to(writer)
+              .run
+          }.map(_ => Sequence.EMPTY_SEQUENCE).attempt.unsafeRunSync()
+      ))
+    }.getOrElse(invalidArg)
   }
 
   /**
@@ -435,14 +505,7 @@ class ExpathFileFunctions(context: XQueryContext, signature: FunctionSignature) 
    * string parameter... typically a path.
    */
   @throws[XPathException]
-  private def fileProperty[T](args: Array[Sequence])(fn: (String) => T) = sarg(args)(0).map(fn(_)) | invalidArg
-
-  /**
-   * Helper function for appending or writing to a process
-   */
-  private def appendOrWrite[T](asf: => \/[FileModuleError, AppendStreamFn[T]], source: Process[Task, T]) =
-    asf.map(_(source))
-      .flatMap(_.map(_ => Sequence.EMPTY_SEQUENCE))
+  private def fileProperty[T](args: Array[Sequence])(fn: (String) => T) = sarg(args)(0).map(fn(_)).getOrElse(invalidArg)
   
   /**
    * Serializes a sequence
@@ -453,51 +516,25 @@ class ExpathFileFunctions(context: XQueryContext, signature: FunctionSignature) 
    * @return The serialized items
    */
   @throws[RuntimeException]
-  private def serializeSequence(outputProperties: JProperties)(seq: Sequence) : ByteVector = {
-    managed(new JByteArrayOutputStream()).map {
-      baos =>
-        managed(new JOutputStreamWriter(baos)).map {
-          writer =>
-            val xqSerializer = new XQuerySerializer(context.getBroker(), outputProperties, writer)
-            xqSerializer.serialize(seq)
-        }.either.rightMap(_ => baos.toByteArray)
-    }.either.joinRight match {
-      case Left(ex) =>
-        throw new RuntimeException(ex(0))
-      case Right(data) =>
-        ByteVector.view(data)
+  private def serializeSequence[F[_]](seq: Sequence, outputProperties: JProperties)(implicit F: Sync[F]) : Stream[F, Byte] = {
+    val in : F[InputStream] = F.delay {
+      val baos = new JByteArrayOutputStream()
+      try {
+        val writer = new JOutputStreamWriter(baos)
+        try {
+          val xqSerializer = new XQuerySerializer(context.getBroker(), outputProperties, writer)
+          xqSerializer.serialize(seq)
+          new ByteArrayInputStream(baos.toByteArray)
+        } finally {
+          writer.close()
+        }
+      } finally {
+        baos.close()
+      }
     }
-  }
 
-  //TODO when serialization becomes stream of item based as opposed to sequence based
-//  def toStream(seq: => Sequence) : Process[Task, Item] =
-//    io.resource(Task.delay(seq))(seq => Task.delay()) {
-//      seq =>
-//        lazy val seqIt = seq.iterate() // A stateful iterator
-//        Task.delay {
-//          if (seqIt.hasNext)
-//            seqIt.nextItem
-//          else
-//            throw Cause.Terminated(Cause.End)
-//        }
-//    }
-  
-  //TODO when serialization becomes stream of item based as opposed to sequence based
-//  def serializeItem(outputProperties: JProperties)(item: Item) : ByteVector = {
-//    managed(new JByteArrayOutputStream()).map {
-//      baos =>
-//        managed(new JOutputStreamWriter(baos)).map {
-//          writer =>
-//            val xqSerializer = new XQuerySerializer(context.getBroker(), outputProperties, writer)
-//            xqSerializer.serialize(item)
-//        }.either.rightMap(_ => baos.toByteArray)
-//    }.either.joinRight match {
-//      case Left(ex) =>
-//        throw new RuntimeException(ex(0))
-//      case Right(data) =>
-//        ByteVector.view(data)
-//    }
-//  }
+    fs2.io.readInputStream(in, FileModule.DEFAULT_BUF_SIZE, true)
+  }
 
   /**
    * Throw a standard invalid argument XPathException
@@ -509,7 +546,7 @@ class ExpathFileFunctions(context: XQueryContext, signature: FunctionSignature) 
    * Adds a safe get(Int) : Maybe[T] method to any Array[T] object
    */
   private implicit class MyArray[T](val array: Array[T]) {
-    def get(idx: Int): Maybe[T] = fromOption(scala.util.Try(array(idx)).toOption)
+    def get(idx: Int): Option[T] = scala.util.Try(array(idx)).toOption
   }
 
   /**
@@ -519,7 +556,7 @@ class ExpathFileFunctions(context: XQueryContext, signature: FunctionSignature) 
    * @param iidx If the argument is a sequence, then the item index within the sequence.
    *       Defaults to 0 which is suitable for an atomic item
    */
-  private def arg[T <: Item](args: Array[Sequence])(idx: Int, iidx: Int = 0) : Maybe[T] = args.get(idx).map(_.itemAt(iidx).asInstanceOf[T])
+  private def arg[T <: Item](args: Array[Sequence])(idx: Int, iidx: Int = 0) : Option[T] = args.get(idx).map(_.itemAt(iidx).asInstanceOf[T])
 
   /**
    * Extract a single string value argument
@@ -528,7 +565,7 @@ class ExpathFileFunctions(context: XQueryContext, signature: FunctionSignature) 
    * @param iidx If the argument is a sequence, then the item index within the sequence.
    *       Defaults to 0 which is suitable for an atomic item
    */
-  private def sarg(args: Array[Sequence])(idx: Int, iidx: Int = 0) : Maybe[StringValue] = arg[StringValue](args)(idx, iidx)
+  private def sarg(args: Array[Sequence])(idx: Int, iidx: Int = 0) : Option[StringValue] = arg[StringValue](args)(idx, iidx)
 
   /**
    * Extract a single boolean value argument
@@ -537,7 +574,7 @@ class ExpathFileFunctions(context: XQueryContext, signature: FunctionSignature) 
    * @param iidx If the argument is a sequence, then the item index within the sequence.
    *       Defaults to 0 which is suitable for an atomic item
    */
-  private def barg(args: Array[Sequence])(idx: Int, iidx: Int = 0) : Maybe[BooleanValue] = arg[BooleanValue](args)(idx, iidx)
+  private def barg(args: Array[Sequence])(idx: Int, iidx: Int = 0) : Option[BooleanValue] = arg[BooleanValue](args)(idx, iidx)
 
   /**
    * Extract a single integer value argument
@@ -546,39 +583,26 @@ class ExpathFileFunctions(context: XQueryContext, signature: FunctionSignature) 
    * @param iidx If the argument is a sequence, then the item index within the sequence.
    *       Defaults to 0 which is suitable for an atomic item
    */
-  private def iarg(args: Array[Sequence])(idx: Int, iidx: Int = 0) : Maybe[IntegerValue] = arg[IntegerValue](args)(idx, iidx)
+  private def iarg(args: Array[Sequence])(idx: Int, iidx: Int = 0) : Option[IntegerValue] = arg[IntegerValue](args)(idx, iidx)
 
   /**
    * Extracts a value from the right or throws
    * an XPathException for the error on the left
    */
   @throws[XPathException]
-  private implicit def getOrThrow[T](value: \/[FileModuleError, T]): T = value.valueOr(throwIt(_))
-
-  /**
-   * Throws an XPathException from a FileModuleError
-   */
-  @throws[XPathException]
-  private def throwIt(fme: FileModuleError) = {
-    val errorCode = new ErrorCode(new QName(fme.name, FileModule.NAMESPACE), fme.description)    
-    throw fme.exception.map(e => new XPathException(this, errorCode, fme.description, null, e)) | new XPathException(errorCode, getLine, getColumn)
+  private implicit def getOrThrow[T](value: Either[FileModuleException, T]): T = {
+    value match {
+      case Right(v) => v
+      case Left(fme) => throw toXPathException(fme)
+    }
   }
 
   /**
-   * If there is an error value then
-   * throw an appropriate XPathException
-   * otherwise return an empty Sequence
-   *
-   * @return An empty sequence
+   * Creates an XPathException from a FileModuleException
    */
-  @throws[XPathException]("If there is an error value")
-  private implicit def emptyOrThrow(value: Maybe[FileModuleError]) : Sequence = {
-    value match {
-      case Just(fme) =>
-        throwIt(fme)
-      case empty =>
-        Sequence.EMPTY_SEQUENCE
-    }
+  private def toXPathException(fme: FileModuleException): XPathException = {
+    val errorCode = new ErrorCode(new QName(fme.fileModuleError.name, FileModule.NAMESPACE), fme.fileModuleError.description)
+    new XPathException(this, errorCode, fme.fileModuleError.description, null, fme)
   }
 
   /**
@@ -586,9 +610,15 @@ class ExpathFileFunctions(context: XQueryContext, signature: FunctionSignature) 
    * either error or value. Exceptions are
    * converted to FileModuleErrors.IoError
    */
-  private def valueOrError[T](v: \/[FileModuleError, \/[Throwable, T]]) : \/[FileModuleError, T] = v.map(_.leftMap(FileModuleErrors.IoError))
+  private def valueOrError[T](v: Either[Throwable, T]) : Either[FileModuleException, T] = {
+    v match {
+      case Right(r) => Right(r)
+      case Left(fileModuleEx: FileModuleException) => Left(fileModuleEx)
+      case Left(t) => Left(new FileModuleException(FileModuleErrors.IoError, t))
+    }
+  }
 
-  private implicit def sv2s(value: Maybe[StringValue]) : Maybe[String] = value.map(_.getStringValue)
-  private implicit def bv2b(value: Maybe[BooleanValue]) : Maybe[Boolean] = value.map(_.getValue)
-  private implicit def iv2i(value: Maybe[IntegerValue]) : Maybe[Int] = value.map(_.getInt)
+  private implicit def sv2s(value: Option[StringValue]) : Option[String] = value.map(_.getStringValue)
+  private implicit def bv2b(value: Option[BooleanValue]) : Option[Boolean] = value.map(_.getValue)
+  private implicit def iv2i(value: Option[IntegerValue]) : Option[Int] = value.map(_.getInt)
 }

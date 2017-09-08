@@ -50,11 +50,15 @@
     <properties>
         <project.email>exist-open@lists.sourceforge.net</project.email>
 
-        <scala.lib.version>2.11</scala.lib.version>
-        <scala.version>2.11.5</scala.version>
+        <scala.lib.version>2.12</scala.lib.version>
+        <scala.version>2.12.3</scala.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
+        <fs2.version>0.10.0-M6</fs2.version>
+        <cats.effect.version>0.4</cats.effect.version>
+
         <exist.version>3.2.0</exist.version>
+        <expath-file-module-lib.version>1.0-SNAPSHOT</expath-file-module-lib.version>
 
         <file.module.namespace>http://expath.org/ns/file</file.module.namespace>
         <java-package-name>org.exist.xquery.modules.expath.file</java-package-name>
@@ -74,14 +78,19 @@
             <version>${scala.version}</version>
         </dependency>
         <dependency>
-            <groupId>org.scalaz</groupId>
-            <artifactId>scalaz-core_${scala.lib.version}</artifactId>
-            <version>7.1.1</version>
+            <groupId>co.fs2</groupId>
+            <artifactId>fs2-io_${scala.lib.version}</artifactId>
+            <version>${fs2.version}</version>
         </dependency>
         <dependency>
-            <groupId>org.scalaz.stream</groupId>
-            <artifactId>scalaz-stream_${scala.lib.version}</artifactId>
-            <version>0.6a</version>
+            <groupId>co.fs2</groupId>
+            <artifactId>fs2-core_${scala.lib.version}</artifactId>
+            <version>${fs2.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.typelevel</groupId>
+            <artifactId>cats-effect_${scala.lib.version}</artifactId>
+            <version>${cats.effect.version}</version>
         </dependency>
         <dependency>
             <groupId>org.exist-db</groupId>
@@ -91,8 +100,8 @@
         </dependency>
         <dependency>
             <groupId>org.exquery.expath</groupId>
-            <artifactId>expath-file-module</artifactId>
-            <version>1.0-SNAPSHOT</version>
+            <artifactId>expath-file-module-lib</artifactId>
+            <version>${expath-file-module-lib.version}</version>
         </dependency>
     </dependencies>
 
@@ -120,7 +129,7 @@
             <plugin>
                 <groupId>org.owasp</groupId>
                 <artifactId>dependency-check-maven</artifactId>
-                <version>1.4.5</version>
+                <version>2.1.1</version>
                 <configuration>
                     <failBuildOnCVSS>8</failBuildOnCVSS>
                 </configuration>
@@ -143,7 +152,7 @@
             <plugin>
                 <groupId>net.alchim31.maven</groupId>
                 <artifactId>scala-maven-plugin</artifactId>
-                <version>3.2.2</version>
+                <version>3.3.1</version>
                 <configuration>
                     <recompileMode>all</recompileMode>
                     <!-- NOTE: "incremental" compilation although faster may require passing to MAVEN_OPTS="-XX:MaxPermSize=128m" -->
@@ -321,7 +330,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
-                <version>3.0.0</version>
+                <version>3.1.0</version>
                 <executions>
                     <execution>
                         <phase>package</phase>
@@ -376,13 +385,6 @@
         <repository>
             <id>exist</id>
             <url>https://raw.github.com/eXist-db/mvn-repo/master/</url>
-        </repository>
-
-        <!-- needed for scalaz-stream 0.6a -->
-        <repository>
-            <id>bintray</id>
-            <name>bintray</name>
-            <url>http://dl.bintray.com/scalaz/releases</url>
         </repository>
     </repositories>
 

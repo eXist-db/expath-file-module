@@ -26,19 +26,19 @@
  */
 package org.exist.xquery.modules.expath.file
 
-import scalaz.concurrent.Task
-import scalaz.stream.Cause.Terminated
-import scalaz.stream._
+
 import java.io.InputStream
-import scodec.bits.ByteVector
+
+import cats.effect.{IO, Sync}
+import fs2.{Chunk, Stream}
 
 /**
  * Code provided by @mikemckibben via scalaz-stream gitter.im 20150211
  */
-private[file] class ProcessInputStream(p: Process[Task, ByteVector]) extends InputStream {
+private[file] class ProcessInputStream[F[_]](p: Stream[F, Byte])(implicit F: Sync[F]) extends InputStream {
 
-  private val step = p.toTask
-  private var buf = ByteVector.empty
+//  private val step = p.toTask
+//  private var buf = ByteVector.empty
 
   override def read(): Int = {
     attemptRead(1) match {
@@ -67,7 +67,8 @@ private[file] class ProcessInputStream(p: Process[Task, ByteVector]) extends Inp
 
   private def readBytes(): ByteVector = {
     try {
-      step.run
+      val chunk = F.map(p.chunks.take(1).runFold(List.empty[Chunk[Byte]])((lst, chunk) => chunk :: lst))(_.head)
+      chunk
     }
     catch {
       case _: Terminated => ByteVector.empty

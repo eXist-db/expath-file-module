@@ -44,10 +44,6 @@ import org.exist.xquery.value.{
 import java.net.URI
 import java.util.Date
 
-import scalaz._
-import Scalaz._
-import Maybe._
-
 
 
 /**
@@ -83,12 +79,14 @@ object Type {
 
 object XdmImplicits {
   implicit def BooleanToXdmBoolean(value: Boolean) : BooleanValue = new BooleanValue(value)
+//  implicit def BooleanToXdmSequence(value: Boolean) : Sequence = new BooleanValue(value)
+
   implicit def LongToXdmDateTime(value: Long) : DateTimeValue = new DateTimeValue(new Date(value))
   implicit def LongToXdmInteger(value: Long) : IntegerValue = new IntegerValue(value)
   implicit def StringToXdmString(value: String) : StringValue = new StringValue(value)
   implicit def XdmStringToString(value: StringValue) : String = value.getStringValue
-  implicit def MStringToXdmString(value: Maybe[String]) : Sequence = value.map(new StringValue(_).asInstanceOf[Sequence]) | Sequence.EMPTY_SEQUENCE
-  implicit def UriToXdmAnyUri(value: URI) : Sequence = new AnyURIValue(value)
+  implicit def MStringToXdmString(value: Option[String]) : Sequence = value.map(new StringValue(_).asInstanceOf[Sequence]).getOrElse(Sequence.EMPTY_SEQUENCE)
+  implicit def UriToXdmAnyUri(value: URI) : AnyURIValue = new AnyURIValue(value)
 }
 
 object Function {
@@ -104,14 +102,14 @@ object Function {
   case class Parameter(override val name: String, xdmType: Type, override val description: String) extends Named with Described
   case class ResultType(xdmType: Typed, override val description: String) extends Described
 
-  def signatures(name: QName, description: String, multiParameters: Seq[Seq[Parameter]], resultType: Maybe[ResultType]): Seq[FunctionSignature] = {
+  def signatures(name: QName, description: String, multiParameters: Seq[Seq[Parameter]], resultType: Option[ResultType]): Seq[FunctionSignature] = {
     multiParameters.map {
       parameters =>
         new FunctionSignature(
           name,
           description,
           parameters.map(p => new FunctionParameterSequenceType(p.name, p.xdmType.xdmType, p.xdmType.cardinality, p.description)).toArray[SequenceType],
-          resultType.map(rt => new FunctionReturnSequenceType(rt.xdmType.xdmType, rt.xdmType.cardinality, rt.description).asInstanceOf[SequenceType]) | new SequenceType(XQType.ITEM, Cardinality.EMPTY)
+          resultType.map(rt => new FunctionReturnSequenceType(rt.xdmType.xdmType, rt.xdmType.cardinality, rt.description).asInstanceOf[SequenceType]).getOrElse(new SequenceType(XQType.ITEM, Cardinality.EMPTY))
         )
     }
   }
