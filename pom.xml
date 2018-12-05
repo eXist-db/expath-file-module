@@ -51,7 +51,7 @@
         <project.email>exist-open@lists.sourceforge.net</project.email>
 
         <scala.lib.version>2.12</scala.lib.version>
-        <scala.version>2.12.6</scala.version>
+        <scala.version>2.12.8</scala.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <fs2.version>0.10.0-M6</fs2.version>
