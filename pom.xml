@@ -54,7 +54,7 @@
         <scala.version>2.12.6</scala.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-        <fs2.version>0.10.0-M6</fs2.version>
+        <fs2.version>3.1.2</fs2.version>
         <cats.effect.version>0.4</cats.effect.version>
 
         <exist.version>3.2.0</exist.version>
