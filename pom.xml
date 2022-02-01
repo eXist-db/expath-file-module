@@ -57,7 +57,7 @@
         <fs2.version>0.10.0-M6</fs2.version>
         <cats.effect.version>0.4</cats.effect.version>
 
-        <exist.version>3.2.0</exist.version>
+        <exist.version>6.0.0</exist.version>
         <expath-file-module-lib.version>1.0-SNAPSHOT</expath-file-module-lib.version>
 
         <file.module.namespace>http://expath.org/ns/file</file.module.namespace>
